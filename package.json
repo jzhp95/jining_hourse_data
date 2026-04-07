@@ -1,0 +1,25 @@
+{
+  "name": "buy_house",
+  "version": "1.0.0",
+  "description": "济宁市楼盘数据抓取工具",
+  "main": "scraper.js",
+  "scripts": {
+    "scrape": "node scraper.js",
+    "scrape:quick": "node scraper.js --pages 2",
+    "scrape:list-only": "node scraper.js --no-details",
+    "fetch-projects": "node fetch_projects.js",
+    "query": "node query_project.js",
+    "batch": "node batch_scrape.js"
+  },
+  "keywords": [
+    "scraper",
+    "loupan",
+    "jining"
+  ],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.27.0",
+  "dependencies": {
+    "md-to-pdf": "^5.2.5"
+  }
+}
