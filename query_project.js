@@ -546,7 +546,12 @@ async function main() {
   try {
     await getProjectInfo(projectID);
   } catch (error) {
-    console.error('\n查询失败:', error.message);
+    console.error('\n查询失败!');
+    console.error('  error类型:', typeof error);
+    console.error('  error本身:', error);
+    console.error('  message:', error?.message);
+    console.error('  code:', error?.code);
+    console.error('  stack:', error?.stack?.split('\n').slice(0, 3).join('\n    '));
     process.exit(1);
   }
 }
