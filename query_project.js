@@ -74,8 +74,21 @@ function getHouseStatus(house) {
 }
 
 function analyzeHouses(houses) {
+  let hasBottomCommerce = false;
+  
+  // 识别并过滤掉商业房源
+  const filteredHouses = houses.filter(house => {
+    // 检查房屋用途是否包含“商业”
+    const purpose = house.HousePurposeText || '';
+    if (purpose.includes('商业')) {
+      hasBottomCommerce = true;
+      return false;
+    }
+    return true;
+  });
+
   const stats = {
-    total: houses.length,
+    total: filteredHouses.length,
     已售: 0,
     可售: 0,
     签约中: 0,
@@ -89,7 +102,7 @@ function analyzeHouses(houses) {
   const forSaleByUnit = {};
   const allByUnit = {};
   
-  houses.forEach(house => {
+  filteredHouses.forEach(house => {
     const status = getHouseStatus(house);
     stats[status]++;
     
@@ -148,7 +161,7 @@ function analyzeHouses(houses) {
     });
   });
   
-  return { stats, forSaleByUnit, allByUnit };
+  return { stats, forSaleByUnit, allByUnit, hasBottomCommerce };
 }
 
 function generateMarkdown(projectID, projectName, companyName, districtName, buildings, totalStats, allForSale) {
@@ -165,7 +178,7 @@ function generateMarkdown(projectID, projectName, companyName, districtName, bui
   md += `| 小区名称 | ${projectName} |\n`;
   md += `| 开发企业 | ${companyName} |\n`;
   md += `| 所在区域 | ${districtName} |\n`;
-  md += `| 楼栋数量 | ${buildings.length} 栋 |\n\n`;
+  md += `| 楼栋数量 | ${buildings.length} 栋 |\n\n> **注**：本报表已自动排除了房屋用途为“商业”的条目。如果楼栋包含商业用途房源，将会在楼栋名称后标注 \`(含底商)\`。\n\n`;
   
   md += `## 销售概况\n\n`;
   md += `| 状态 | 数量 | 占比 |\n`;
@@ -190,7 +203,8 @@ function generateMarkdown(projectID, projectName, companyName, districtName, bui
   buildings.forEach(b => {
     const rate = b.stats.total > 0 ? (b.stats.已售 / b.stats.total * 100).toFixed(1) : '0.0';
     const floorDisplay = b.allFloor > 0 ? `${b.allFloor}层` : '-';
-    md += `| ${b.buildName} | ${floorDisplay} | ${b.stats.total} | ${b.stats.已售} | ${b.stats.可售} | ${b.stats.签约中} | ${rate}% | ${b.sellingCode} |\n`;
+    const nameDisplay = b.buildName + (b.hasBottomCommerce ? ' (含底商)' : '');
+    md += `| ${nameDisplay} | ${floorDisplay} | ${b.stats.total} | ${b.stats.已售} | ${b.stats.可售} | ${b.stats.签约中} | ${rate}% | ${b.sellingCode} |\n`;
   });
   md += `| **合计** | - | **${totalStats.total}** | **${totalStats.已售}** | **${totalStats.可售}** | **${totalStats.签约中}** | **${soldRate}%** | - |\n`;
   md += `\n`;
@@ -211,7 +225,7 @@ function generateMarkdown(projectID, projectName, companyName, districtName, bui
       });
       
       sortedUnits.forEach(unit => {
-        const unitName = unit === '00' ? '商业/其他' : `${unit}单元`;
+        const unitName = unit === '00' ? '其他' : `${unit}单元`;
         md += `#### ${unitName}\n\n`;
         md += `| 房号 | 楼层 | 建筑面积(m²) | 套内面积(m²) | 公摊面积(m²) | 使用率 | 房屋用途 | 状态 |\n`;
         md += `|------|------|-------------|-------------|-------------|--------|----------|------|\n`;
@@ -241,7 +255,7 @@ function generateMarkdown(projectID, projectName, companyName, districtName, bui
     md += `|------|------|------|------|-------------|-------------|-------------|--------|----------|\n`;
     
     allForSale.forEach(h => {
-      const unitName = h.unit === '00' ? '商业' : `${h.unit}单元`;
+      const unitName = h.unit === '00' ? '其他' : `${h.unit}单元`;
       const buildArea = parseFloat(h.buildArea) || 0;
       const inArea = parseFloat(h.inArea) || 0;
       const apportionArea = h.apportionArea || (buildArea > 0 ? (buildArea - inArea).toFixed(2) : '-');
@@ -258,42 +272,71 @@ function generateMarkdown(projectID, projectName, companyName, districtName, bui
 }
 
 async function getProjectInfo(projectID) {
-  const buildData = await fetchWithRetry(`${BUILD_LIST_API}?searchConent=${projectID}&page=1`);
-  
-  if (!buildData.rows || buildData.rows.length === 0) {
-    console.log('\n未找到该小区的楼栋信息，请检查小区代码是否正确\n');
+  const PAGE_SIZE = 20;
+  let page = 1;
+  let allBuildRows = [];
+  const seenBuildIDs = new Set();
+
+  while (true) {
+    const buildData = await fetchWithRetry(`${BUILD_LIST_API}?searchConent=${projectID}&page=${page}&pageSize=${PAGE_SIZE}`);
+    if (!buildData.rows || buildData.rows.length === 0) break;
+
+    let newCount = 0;
+    for (const row of buildData.rows) {
+      const buildID = row.BuildID;
+      if (!seenBuildIDs.has(buildID)) {
+        seenBuildIDs.add(buildID);
+        allBuildRows.push(row);
+        newCount++;
+      }
+    }
+
+    if (newCount === 0) break;
+
+    page++;
+    await sleep(DELAY_MS);
+  }
+
+  // 【核心修复】精准过滤：只保留 ProjectID 完全匹配的项目
+  const filteredBuildRows = allBuildRows.filter(row => row.ProjectID === projectID);
+
+  if (filteredBuildRows.length === 0) {
+    console.log(`\n未找到 ProjectID 为 "${projectID}" 的精准匹配小区（模糊搜索结果中不包含该 ID）\n`);
     return null;
   }
-  
-  const projectName = buildData.rows[0].ProjectName;
-  const companyName = buildData.rows[0].CompanyName;
-  const districtName = buildData.rows[0].DistrictName;
-  
+
+  const projectName = allBuildRows[0].ProjectName;
+  const companyName = allBuildRows[0].CompanyName;
+  const districtName = allBuildRows[0].DistrictName;
+
   console.log('\n========================================');
   console.log(`小区名称: ${projectName}`);
   console.log(`开发企业: ${companyName}`);
   console.log(`所在区域: ${districtName}`);
-  console.log(`楼栋数量: ${buildData.total} 栋`);
+  console.log(`楼栋数量: ${filteredBuildRows.length} 栋`);
   console.log('========================================\n');
-  
+
+  // 标记 buildingCount，供后续使用
+  const totalBuildings = filteredBuildRows.length;
+
   const buildings = [];
   const allHouses = [];
   let totalStats = { total: 0, 已售: 0, 可售: 0, 签约中: 0, 抵押: 0, 查封: 0, 限制销售: 0, 超期锁定: 0, 不可售: 0 };
   let allForSale = [];
-  
-  for (const build of buildData.rows) {
+
+  for (const build of allBuildRows) {
     await sleep(DELAY_MS);
     
     try {
       const houses = await fetchWithRetry(`${HOUSE_DETAIL_API}?BuildID=${build.BuildID}`);
-      const { stats, forSaleByUnit, allByUnit } = analyzeHouses(houses);
+      const { stats, forSaleByUnit, allByUnit, hasBottomCommerce } = analyzeHouses(houses);
       
       const maxFloor = houses.length > 0 ? Math.max(...houses.map(h => h.AllFloor || 0)) : 0;
       const totalInArea = houses.length > 0 
         ? houses.reduce((sum, h) => sum + (parseFloat(h.InArea) || 0), 0).toFixed(2)
         : 0;
       
-      console.log(`【${build.BuildName}】`);
+      console.log(`【${build.BuildName}】${hasBottomCommerce ? ' (含底商)' : ''}`);
       console.log(`  预售证号: ${build.SellingCode}`);
       console.log(`  总套数: ${stats.total}  已售: ${stats.已售}  可售: ${stats.可售}  签约中: ${stats.签约中}`);
       
@@ -396,8 +439,13 @@ async function getProjectInfo(projectID) {
   const outputFile = path.join(projectDir, `${baseFileName}.md`);
   
   const mdContent = generateMarkdown(projectID, projectName, companyName, districtName, buildings, totalStats, allForSale);
+  
+  // 确保覆盖已存在的文件
+  if (fs.existsSync(outputFile)) {
+    fs.unlinkSync(outputFile);
+  }
   fs.writeFileSync(outputFile, mdContent, 'utf-8');
-  console.log(`Markdown报告已保存到: ${outputFile}\n`);
+  console.log(`[MD] 报告已保存（覆盖）: ${outputFile}\n`);
   
   console.log('正在生成PDF...');
   try {
@@ -441,8 +489,12 @@ async function getProjectInfo(projectID) {
     
     if (pdf) {
       const pdfFile = path.join(projectDir, `${baseFileName}.pdf`);
+      // 确保覆盖已存在的文件
+      if (fs.existsSync(pdfFile)) {
+        fs.unlinkSync(pdfFile);
+      }
       fs.writeFileSync(pdfFile, pdf.content);
-      console.log(`PDF报告已保存到: ${pdfFile}\n`);
+      console.log(`[PDF] 报告已保存（覆盖）: ${pdfFile}\n`);
     }
   } catch (pdfError) {
     console.log(`PDF生成失败: ${pdfError.message}`);
@@ -461,8 +513,13 @@ async function getProjectInfo(projectID) {
     buildings: buildings,
     houses: allHouses
   };
+
+  // 确保覆盖已存在的文件
+  if (fs.existsSync(jsonFile)) {
+    fs.unlinkSync(jsonFile);
+  }
   fs.writeFileSync(jsonFile, JSON.stringify(result, null, 2), 'utf-8');
-  console.log(`JSON数据已保存到: ${jsonFile}\n`);
+  console.log(`[JSON] 数据已保存（覆盖）: ${jsonFile}\n`);
   
   return result;
 }

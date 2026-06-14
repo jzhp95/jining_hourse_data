@@ -1,5 +1,8 @@
-node_modules/
-output/
-*.log
+node_modules
+output
 .DS_Store
-project_*.json
+.venv
+环境/
+规划图/
+瑞马璟瑞_光照分析报告.md
+瑞马璟瑞_光照分析报告.pdf
