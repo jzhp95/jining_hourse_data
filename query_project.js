@@ -23,20 +23,29 @@ function httpsGet(url) {
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
         'Referer': 'https://www.zwfw.jnszf.cn/PublicServices/lpcx'
       },
-      rejectUnauthorized: false
+      rejectUnauthorized: false,
+      timeout: 30000
     };
     
-    https.get(url, options, (res) => {
+    const req = https.get(url, options, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
         try {
           resolve(JSON.parse(data));
         } catch (e) {
-          reject(new Error(`JSON parse error: ${e.message}`));
+          reject(new Error(`JSON parse error: ${e.message}, raw: ${data.substring(0, 200)}`));
         }
       });
-    }).on('error', reject);
+    });
+    
+    req.on('error', (err) => {
+      reject(new Error(`HTTP error: ${err.code || err.message} (${err.syscall || ''})`));
+    });
+
+    req.on('timeout', () => {
+      req.destroy(new Error(`TIMEOUT: 请求超时 (${url.substring(0, 80)})`));
+    });
   });
 }
 
@@ -537,7 +546,7 @@ async function main() {
   try {
     await getProjectInfo(projectID);
   } catch (error) {
-    console.error('\n查询失败:', error.message, '\n');
+    console.error('\n查询失败:', error.message);
     process.exit(1);
   }
 }
