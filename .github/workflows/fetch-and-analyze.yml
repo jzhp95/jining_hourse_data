@@ -1,0 +1,69 @@
+name: 抓取并分析楼盘数据
+
+on:
+  schedule:
+    # 每天早上 8:00 和晚上 20:00 运行（北京时间）
+    - cron: '0 0,12 * * *'
+  workflow_dispatch:  # 支持手动触发
+
+permissions:
+  contents: write
+
+jobs:
+  fetch-and-analyze:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 拉取完整历史用于 git diff
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.27.0
+
+      - name: 获取 pnpm 缓存目录
+        id: pnpm-cache
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+
+      - name: 缓存 pnpm 依赖
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 安装 Chromium 系统依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y chromium-browser libnss3 libatk-bridge2.0-0 libdrm2
+
+      - name: 设置时区
+        run: sudo ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+
+      - name: 执行抓取与分析
+        run: bash fetch_and_analyze.sh
+        env:
+          NODE_TLS_REJECT_UNAUTHORIZED: '0'
+          TZ: Asia/Shanghai
+
+      - name: 提交数据变更到仓库
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # output/ 在 .gitignore 中，需要 --force 强制添加
+          git add -f output/
+          git diff --quiet && git diff --staged --quiet || git commit -m "chore(data): 自动抓取更新 $(TZ=Asia/Shanghai date '+%Y%m%d %H:%M')"
+          git push
