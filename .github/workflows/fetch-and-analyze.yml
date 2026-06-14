@@ -76,6 +76,10 @@ jobs:
 
       - name: 提交数据变更到仓库
         run: |
+          if [ ! -d "output" ]; then
+            echo "output/ 目录不存在，跳过提交"
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           # output/ 在 .gitignore 中，需要 --force 强制添加
