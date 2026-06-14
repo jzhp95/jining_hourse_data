@@ -30,5 +30,15 @@ cd "${SCRIPT_DIR}" && node analyze_changes.js
 
 echo ""
 echo "========================================="
+echo "  提交数据到远程仓库"
+echo "========================================="
+echo ""
+
+cd "${SCRIPT_DIR}" && git add -f output/ && git diff --quiet && git diff --staged --quiet || \
+  git commit -m "chore(data): 自动抓取更新 $(TZ=Asia/Shanghai date '+%Y%m%d %H:%M')" && \
+  git push
+
+echo ""
+echo "========================================="
 echo "  全部完成！"
 echo "========================================="
