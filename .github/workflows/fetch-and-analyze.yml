@@ -56,6 +56,18 @@ jobs:
       - name: 设置时区
         run: sudo ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 
+      - name: 检测 API 连通性
+        run: |
+          echo "=== DNS 解析测试 ==="
+          nslookup www.zwfw.jnszf.cn 2>&1 || echo "nslookup 失败"
+          echo ""
+          echo "=== 网络连通测试 ==="
+          curl -sI --connect-timeout 15 "https://www.zwfw.jnszf.cn/PortalSite/SpfQuery/GetAllCompanyNameList" 2>&1 | head -20
+          echo ""
+          echo "=== curl 状态码 ==="
+          curl -s -o /dev/null -w "%{http_code}" --connect-timeout 15 "https://www.zwfw.jnszf.cn/PortalSite/SpfQuery/GetAllCompanyNameList" 2>&1
+          echo ""
+
       - name: 执行抓取与分析
         run: bash fetch_and_analyze.sh
         env:
